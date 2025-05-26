@@ -257,7 +257,7 @@ class SalesRAGBot:
     def _update_lead_state(self, message: str) -> None:
         """Update the lead capture state based on the message."""
         interest_indicators = [
-            "schedule", "meeting", "interested", "pricing", "cost",
+            "schedule", "meeting", "interested", "pricing", "cost","interest",
             "sign up", "enroll", "register", "buy", "purchase","want","Desire"
         ]
         
@@ -397,7 +397,7 @@ def main():
     """Main function to run the sales RAG chatbot."""
     try:
         # Initialize the chatbot
-        # pdf_path = 'C:/Users/admin/Documents/Document/Bot/src/FSTC_Contact.pdf' 
+        # pdf_path = 'C:/Users/admin/Documents/Document/Bot/src/Question.pdf' 
         pdf_path = '/home/ubuntu/AgenticBotImplementation/FSTC_Contact.pdf'
         chatbot = SalesRAGBot(pdf_path)
         
