@@ -159,8 +159,8 @@ class SalesRAGBot:
             raw_docs = loader.load()
             
             text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200,
+                chunk_size=600,
+                chunk_overlap=100,
                 length_function=len,
             )
             
@@ -188,7 +188,7 @@ class SalesRAGBot:
     def _get_relevant_context(self, query: str) -> str:
         """Get relevant context from the vector store."""
         try:
-            docs = self.vector_store.similarity_search(query, k=3)
+            docs = self.vector_store.similarity_search(query, k=5)
             return "\n".join(doc.page_content for doc in docs)
         except Exception as e:
             logger.error(f"Error getting context: {str(e)}")
@@ -286,42 +286,48 @@ class SalesRAGBot:
                 if field not in self.partial_lead_info or self.partial_lead_info[field] == "N/A"]
 
     def _generate_response(self, message: str) -> str:
-        """Generate a response using the LLM."""
+        """Generate a response using the LLM with enhanced conversation history handling and topic tracking."""
         try:
             # Get relevant context
             context = self._get_relevant_context(message)
             
-            # Prepare the prompt
+            # Extract the last few messages for immediate context
+            recent_messages = self.conversation_history[-6:] if len(self.conversation_history) > 6 else self.conversation_history
+            
+            # Extract topics from recent conversation
+            topics_prompt = """Given these conversation messages, identify the main topic being discussed:
+            {}
+            Return ONLY the topic being discussed, nothing else.""".format("\n".join(recent_messages))
+            
+            topic_response = self.llm.invoke(topics_prompt)
+            current_topic = topic_response.content
+            
+            # Prepare system context including current topic
+            system_context = f"""Current topic of discussion: {current_topic}
+            Previous conversation context: {recent_messages}
+            Product information: {context}
+            Lead information: {json.dumps(self.partial_lead_info, indent=2) if self.partial_lead_info else "No lead information yet"}
+            Lead state: {self.lead_state.value}"""
+            
+            # Enhanced response generation prompt
             prompt = f"""You are a friendly and professional sales assistant. Your goal is to:
-1. Provide helpful information about our products/courses
-2. Engage in natural, human-like conversation
-3. Be concise and avoid unnecessary questions
-4. Only ask for contact information when genuinely needed
-5. Avoid repetitive or robotic responses
+            1. Provide helpful information about our products/courses
+            2. Engage in natural, human-like conversation
+            3. Maintain continuity with the current topic: {current_topic}
+            4. Understand and reference previous context when relevant
+            5. If the user asks for more information about something you mentioned, expand on that specific topic
+            6. If the query seems to reference previous information but is unclear (like 'Tell me more' or 'What about the price?'),
+               use the current topic to understand what they're asking about
+            7. Be concise but complete in your responses
+            8. Use natural conversational language
+            9. Only ask for contact information when there's genuine interest
 
-Guidelines:
-- Keep responses brief and to the point
-- Use a casual, friendly tone
-- Don't ask questions unless necessary
-- Don't repeat information already provided
-- Don't use formal or robotic language
-- Don't add unnecessary pleasantries
-- Don't ask for information that's already been provided
+            System Context:
+            {system_context}
 
-Previous conversation:
-{self.conversation_history}
+            Human: {message}
 
-Relevant product information:
-{context}
-
-Current lead information:
-{json.dumps(self.partial_lead_info, indent=2) if self.partial_lead_info else "No lead information yet"}
-
-Current lead state: {self.lead_state.value}
-
-Human: {message}
-
-Assistant:"""
+            Assistant: Be direct and natural in your response, maintaining the conversation flow about {current_topic} if relevant."""
             
             # Get response from LLM
             response = self.llm.invoke(prompt)
@@ -345,8 +351,8 @@ Assistant:"""
             
             # Add assistant response to conversation history
             self.conversation_history.append(f"Assistant: {response}")
-            self.conversation_history = self.conversation_history[-10:]
-
+            self.conversation_history = self.conversation_history[-30:]
+            logger.info(f"Conversation history: {self.conversation_history}")
             # Handle lead capture state
             if self.lead_state == LeadCaptureState.INTEREST_DETECTED:
                 missing_fields = self._get_missing_fields()
@@ -429,4 +435,4 @@ def main():
         print(f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
-    main() 
+    main()
