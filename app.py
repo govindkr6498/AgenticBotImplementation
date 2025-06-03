@@ -5,26 +5,13 @@ import json
 import os
 from sales_rag_bot import SalesRAGBot, LeadCaptureState
 import logging
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
-from fastapi.responses import JSONResponse, FileResponse
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-app = FastAPI()
-
-# CORS Configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Initialize session state
 if 'session_id' not in st.session_state:
