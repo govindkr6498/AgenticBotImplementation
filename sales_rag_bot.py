@@ -1,8 +1,11 @@
 import logging
+from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from typing import Dict, Any, Optional, List
 from dotenv import load_dotenv
 import json
+import pytz
 import requests
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -10,7 +13,10 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from pydantic import BaseModel, Field, EmailStr
 from enum import Enum
-
+from datetime import datetime, timedelta
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -31,10 +37,11 @@ class LeadCaptureState(Enum):
     INTEREST_DETECTED = "interest_detected"
     COLLECTING_INFO = "collecting_info"
     INFO_COMPLETE = "info_complete"
+    AWAITING_MEETING_CONFIRMATION = "awaiting_meeting_confirmation"
+    WAITING_MEETING_SLOT_SELECTION = "waiting_meeting_slot_selection"
 
 class SalesforceAPI:
     """Salesforce API client for lead management."""
-    
     def __init__(self):
         """Initialize Salesforce API client."""
         self.auth_url = "https://iqb4-dev-ed.develop.my.salesforce.com/services/oauth2/token"
@@ -102,17 +109,128 @@ class SalesforceAPI:
             )
             # response.raise_for_status()
             if response.status_code == 201:
+                lead_id = response.json().get("id")
+                logger.info(f"lead_id: {lead_id}")
                 logger.info(f"Lead created successfully: {response.json()}")
+                return True, lead_id
+                # return True, "Would you like to meet a sales advisor this week?"
             elif response.status_code == 400 and "DUPLICATES_DETECTED" in response.text:
-                logger.info(f"Lead created successfully: {response.json()}")
+                error_data = response.json()
+                # Extract duplicate lead ID
+                match_records = (
+                    error_data[0]
+                    .get("duplicateResult", {})
+                    .get("matchResults", [])[0]
+                    .get("matchRecords", [])
+                )
+                if match_records:
+                    lead_id = match_records[0]["record"]["Id"]
+                    logger.info(f"duplicate_lead_id: {lead_id}")
+                    logger.info(f"Lead created successfully: {response.json()}")
+                    return True, lead_id
+                    # return True, "Would you like to meet a sales advisor this week?"
             else:
                 logger.info('fail Created')
             # logger.info(f"Lead created successfully: {response.json()}")
-            return True
+            return "Would you like to meet a sales advisor this week?"
             
         except Exception as e:
             logger.error(f"Failed to create lead: {str(e)}")
             return False
+    
+    def create_meeting(self, lead_id: str, start_time_str: str) -> bool:
+        try:
+            if not self.access_token or not self.instance_url:
+                self._authenticate()
+
+            # Validate lead information
+            event_url = f"{self.instance_url}/services/data/v60.0/sobjects/Event/"
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json"
+            }
+            start_dt = datetime.strptime(start_time_str, "%H:%M")
+            # Assuming meeting duration 30 minutes, and date as today
+            ist = pytz.timezone('Asia/Kolkata')
+            start_dt_local = datetime.strptime(start_time_str, "%H:%M")
+            today_local = datetime.now(ist).date()
+            start_local_dt = ist.localize(datetime.combine(today_local, start_dt_local.time()))
+            start_utc_dt = start_local_dt.astimezone(pytz.utc) + timedelta(hours=5) + timedelta(minutes=30)
+            end_utc_dt = start_utc_dt + timedelta(minutes=30)
+
+            start_datetime_iso = start_utc_dt.isoformat()
+            end_datetime_iso = end_utc_dt.isoformat()
+
+            event_payload = {
+                "Subject": "Call with Sales Advisor",
+                "StartDateTime": start_datetime_iso,
+                "EndDateTime": end_datetime_iso,
+                "OwnerId": "0055j00000BYNIBAA5",
+                "WhoId": lead_id,
+                "Location": "Virtual Call",
+                "Description": "Scheduled via Agentic Bot"
+            }
+
+            response = requests.post(event_url, headers=headers, json=event_payload)
+            if response.status_code == 201:
+                meeting_id = response.json().get("id")
+                logger.info(f"Meeting created successfully: {meeting_id}")
+                return True
+            else:
+                logger.error(f"Failed to create meeting: {response.text}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Exception while creating meeting: {str(e)}")
+            return False
+
+    def show_availableMeeting(self) -> Optional[List[str]]:
+        start_times = set()
+        try:
+            if not self.access_token or not self.instance_url:
+                self._authenticate()
+            event_url = f"{self.instance_url}/services/data/v60.0/query?q=SELECT+StartDateTime,+EndDateTime+FROM+Event+WHERE+StartDateTime+=+TODAY"
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json"
+            }
+            response = requests.get(event_url, headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                records = data.get("records", [])
+
+                # if not records:
+                #     logger.info("No meetings scheduled for today.")
+                # else:
+                fmt = "%H:%M"
+                start_time = datetime.strptime("08:00", fmt)
+                end_time = datetime.strptime("17:00", fmt)
+                all_slots = set()
+                current = start_time
+                while current < end_time:
+                    all_slots.add(current.strftime(fmt))
+                    current += timedelta(minutes=30)               
+                for event in records:
+                    start = event.get("StartDateTime")
+                    if start:
+                        try:
+                            dt = datetime.strptime(start, "%Y-%m-%dT%H:%M:%S.%f%z")
+                            time_only = dt.strftime("%H:%M")
+                            start_times.add(time_only)
+                        except Exception as parse_err:
+                            logger.warning(f"Failed to parse StartDateTime: {start} ({parse_err})")
+                available_slots = sorted(all_slots - start_times)
+                logger.info(f"Schedule  meeting slots: {start_times}")
+                logger.info(f"Available meeting slots: {available_slots}")
+                return available_slots
+            else:
+                logger.error(f"Failed to showing meeting Time: {response.text}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Exception while showing meeting: {str(e)}")
+            return False
+
 
 class SalesRAGBot:
     def __init__(self, pdf_path: str, model_name: str = "gpt-3.5-turbo-0125"):
@@ -125,6 +243,11 @@ class SalesRAGBot:
         self.partial_lead_info = {}
         self.conversation_history = []
         self.salesforce = SalesforceAPI()
+        self.awaiting_meeting_confirmation = False
+        self.awaiting_meeting_slot_selection = False
+        self.awaiting_meeting_response = False
+        self.current_lead_id = None
+        self.available_slots = []
         logger.info("SalesRAGBot initialized")
 
     def _setup_environment(self) -> None:
@@ -287,6 +410,18 @@ class SalesRAGBot:
 
     def _generate_response(self, message: str) -> str:
         """Generate a response using the LLM with enhanced conversation history handling and topic tracking."""
+        if self.awaiting_meeting_response:
+            self.awaiting_meeting_response = False
+            if message.strip().lower() in ["yes", "yeah", "yup", "sure", "please"]:
+                available_slots = self.show_availableMeeting()
+                if available_slots:
+                    slots_text = ", ".join(available_slots)
+                    return f"Here are the available meeting slots: {slots_text}. Please choose one."
+                else:
+                    return "Sorry, no available meeting slots were found at the moment."
+            else:
+                return "No problem. Let me know if you need anything else."
+            
         try:
             # Get relevant context
             context = self._get_relevant_context(message)
@@ -376,15 +511,67 @@ class SalesRAGBot:
                     self.lead_state = LeadCaptureState.INFO_COMPLETE
             
             elif self.lead_state == LeadCaptureState.INFO_COMPLETE:
-                if self.salesforce.create_lead(self.partial_lead_info):
+                lead_created, lead_id = self.salesforce.create_lead(self.partial_lead_info)
+                if lead_created:
+                    self.current_lead_id = lead_id
                     logger.info("Lead information saved to Salesforce successfully")
-                    response += "\n\nGreat! I've saved your information. Our team will reach out to you shortly."
-                    self.lead_state = LeadCaptureState.NO_INTEREST
-                    self.partial_lead_info = {}
+                    self.lead_state = LeadCaptureState.AWAITING_MEETING_CONFIRMATION
+                    response += "\n\nGreat! I've saved your information.\n\nDo you want to schedule meeting with FSTC Team Member? (Yes/No)"
                 else:
                     logger.error("Failed to save lead information to Salesforce")
                     response += "\n\nSorry, I had trouble saving your information. Would you mind trying again?"
-            
+
+            elif self.lead_state == LeadCaptureState.AWAITING_MEETING_CONFIRMATION:
+                if message.strip().lower() in ["yes", "yeah", "y", "sure", "please"]:
+                    self.available_slots = self.salesforce.show_availableMeeting() or []
+                    # self.lead_state = LeadCaptureState.NO_INTEREST  # Reset state
+                    if self.available_slots:
+                        self.lead_state = LeadCaptureState.WAITING_MEETING_SLOT_SELECTION
+                        # slots_text = ", ".join(self.available_slots)
+                        slots_text = self.format_slots_nicely(self.available_slots)
+                        response += f"\n\nHere are the available meeting slots for today: {slots_text}"
+                    else:
+                        self.lead_state = LeadCaptureState.NO_INTEREST
+                        response += "\n\nSorry, I couldn’t fetch available meeting slots right now."
+                else:
+                    self.lead_state = LeadCaptureState.NO_INTEREST
+                    response += "\n\nNo problem! Let me know if you have any other questions."
+
+            elif self.lead_state == LeadCaptureState.WAITING_MEETING_SLOT_SELECTION:
+                # Clean and normalize user input
+                parsed_time = message.strip().lower()
+                parsed_time = parsed_time.replace("\"", "").replace("'", "").replace(" ", "").replace(".", "")
+
+                # Normalize formats like "9", "930", "09", "0930"
+                if parsed_time.isdigit():
+                    if len(parsed_time) <= 2:
+                        parsed_time = parsed_time.zfill(2) + ":00"        # "9" -> "09:00"
+                    elif len(parsed_time) == 3:
+                        parsed_time = "0" + parsed_time[0] + ":" + parsed_time[1:]  # "930" -> "09:30"
+                    elif len(parsed_time) == 4:
+                        parsed_time = parsed_time[:2] + ":" + parsed_time[2:]       # "0930" -> "09:30"
+                elif ":" in parsed_time:
+                    parts = parsed_time.split(":")
+                    if len(parts) == 2 and all(p.isdigit() for p in parts):
+                        parsed_time = parts[0].zfill(2) + ":" + parts[1].zfill(2)
+
+                logger.info(f"✅ Final normalized time: {parsed_time}")
+                logger.info(f"🔎 Comparing against available slots: {self.available_slots}")
+
+                # Match the time against available slots exactly
+                if parsed_time in self.available_slots and self.current_lead_id:
+                    success = self.salesforce.create_meeting(self.current_lead_id, parsed_time)
+                    self.lead_state = LeadCaptureState.NO_INTEREST
+                    self.available_slots = []
+                    self.current_lead_id = None
+                    if success:
+                        response = f"✅ Your meeting has been scheduled at {parsed_time}. Our team will contact you soon!"
+                    else:
+                        response = f"❌ Something went wrong while scheduling your meeting at {parsed_time}. Please try again."
+                else:
+                    response = f"⚠️ \"{message}\" is not a valid time. Please choose from: {', '.join(self.available_slots)}"
+
+
             return {
                 "response": response,
                 "lead_info": self.partial_lead_info if self.partial_lead_info else None,
@@ -399,12 +586,38 @@ class SalesRAGBot:
                 "lead_state": self.lead_state.value
             }
 
+
+    def format_slots_nicely(self, slots: List[str], columns: int = 3) -> str:
+        """Formats meeting slots in a professional table layout"""
+        if not slots:
+            return "No available time slots at the moment."
+        
+        # Calculate column width based on longest time slot
+        max_length = max(len(slot) for slot in slots) 
+        column_width = max_length + 5  # extra spacing between columns
+        # Format slots into aligned columns
+        rows = []
+        for i in range(0, len(slots), columns):
+            row = []
+            for j in range(columns):
+                idx = i + j
+                if idx < len(slots):
+                    row.append(f"{slots[idx]:>{column_width}}")
+            rows.append("".join(row)) 
+        
+        return (
+             "Available meeting times:\n\n" +
+            "\n".join(rows) +  # only 1 newline between rows
+            "\n\nPlease pick one."
+        )
+
+
 def main():
     """Main function to run the sales RAG chatbot."""
     try:
         # Initialize the chatbot
-        # pdf_path = 'C:/Users/admin/Documents/Document/Bot/src/Question.pdf' 
-        pdf_path = '/home/ubuntu/AgenticBotImplementation/FSTC_Contact.pdf'
+        pdf_path = 'C:/Users/admin/Documents/Document/Bot/src/FSTC_Contact.pdf' 
+        # pdf_path = '/home/ubuntu/AgenticBotImplementation/FSTC_Contact.pdf'
         chatbot = SalesRAGBot(pdf_path)
         
         print("Welcome to the Sales Assistant!")
