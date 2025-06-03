@@ -5,13 +5,26 @@ import json
 import os
 from sales_rag_bot import SalesRAGBot, LeadCaptureState
 import logging
-
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+from fastapi.responses import JSONResponse, FileResponse
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+app = FastAPI()
+
+# CORS Configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Initialize session state
 if 'session_id' not in st.session_state:
@@ -31,7 +44,7 @@ def initialize_chatbot():
     """Initialize the chatbot for the current session."""
     if st.session_state.chatbot is None:
         try:
-            st.session_state.chatbot = SalesRAGBot('/home/ubuntu/AgenticBotImplementation/FSTC_Contact.pdf')
+            st.session_state.chatbot = SalesRAGBot('C:/Users/admin/Documents/Document/Bot/src/FSTC_Contact.pdf')
             logger.info(f"Chatbot initialized for session {st.session_state.session_id}")
         except Exception as e:
             logger.error(f"Error initializing chatbot: {str(e)}")
