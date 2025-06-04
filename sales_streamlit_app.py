@@ -121,26 +121,6 @@ def main():
     # Initialize chatbot
     initialize_chatbot()
 
-    # Sidebar
-    # with st.sidebar:
-    #     st.header("Session Information")
-    #     st.write(f"Session ID: {st.session_state.session_id}")
-        
-    #     if st.session_state.lead_info:
-    #         st.subheader("Lead Information")
-    #         st.json(st.session_state.lead_info)
-        
-    #     st.subheader("Current State")
-    #     st.write(f"Lead Capture: {st.session_state.lead_state}")
-        
-    #     if st.button("Start New Session"):
-    #         st.session_state.session_id = str(uuid.uuid4())
-    #         st.session_state.chatbot = None
-    #         st.session_state.messages = []
-    #         st.session_state.lead_info = None
-    #         st.session_state.lead_state = LeadCaptureState.NO_INTEREST.value
-    #         st.session_state.chat_file = None
-    #         st.rerun()
 
     # Chat container
     chat_container = st.container()
