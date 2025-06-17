@@ -272,10 +272,9 @@ class SalesRAGBot:
     def _setup_environment(self) -> None:
         """Set up environment variables and API keys."""
         load_dotenv()
-        OPENAI_API_KEY="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"
-        if not OPENAI_API_KEY:
+        if not os.getenv('OPENAI_API_KEY'):
             raise ValueError("OPENAI_API_KEY not found in environment variables")
-        os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+        os.environ["OPENAI_API_KEY"] = os.getenv('OPENAI_API_KEY')
         logger.info("Environment setup completed")
 
     def _initialize_components(self) -> None:
