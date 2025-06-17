@@ -1040,8 +1040,8 @@ def main():
     """Main function to run the sales RAG chatbot."""
     try:
         # Initialize the chatbot
-        pdf_path = 'C:/Users/admin/Documents/Document/Bot/src/Emaar_FAQ.pdf' 
-        # pdf_path = '/home/ubuntu/AgenticBotImplementation/FSTC_Contact.pdf'
+        # pdf_path = 'C:/Users/admin/Documents/Document/Bot/src/Emaar_FAQ.pdf' 
+        pdf_path = '/home/ubuntu/AgenticBotImplementation/Emaar_FAQ.pdf'
         chatbot = SalesRAGBot(pdf_path)
         
         print("Welcome to the Sales Assistant!")
