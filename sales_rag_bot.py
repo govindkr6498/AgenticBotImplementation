@@ -456,14 +456,16 @@ class SalesRAGBot:
             7. Be concise but complete in your responses
             8. Use natural conversational language
             9. Only ask for contact information when there's genuine interest
-
+            10. **Only provide the answer data available context from the PDF**
+            11. if there is no relevant sytem context as per the question then tell me i dont have enough knowldege about it
+            12. always check the relevance of system context and user query
             System Context:
             {system_context}
-
+        
             Human: {message}
 
             Assistant: Be direct and natural in your response, maintaining the conversation flow about {current_topic} if relevant."""
-            
+            print(f"system_context  {system_context}")
             # Get response from LLM
             response = self.llm.invoke(prompt)
             return response.content
@@ -616,8 +618,8 @@ def main():
     """Main function to run the sales RAG chatbot."""
     try:
         # Initialize the chatbot
-        # pdf_path = 'C:/Users/admin/Documents/Document/Bot/src/FSTC_Contact.pdf' 
-        pdf_path = '/home/ubuntu/AgenticBotImplementation/FSTC_Contact.pdf'
+        pdf_path = 'C:/Users/admin/Documents/Document/Bot/src/Emaar_FAQ.pdf' 
+        # pdf_path = '/home/ubuntu/AgenticBotImplementation/FSTC_Contact.pdf'
         chatbot = SalesRAGBot(pdf_path)
         
         print("Welcome to the Sales Assistant!")
