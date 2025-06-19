@@ -2,10 +2,18 @@ import logging
 from datetime import datetime
 from datetime import datetime, timedelta
 import os
+from typing import Dict, Any, Optional, List, Union
 from typing import Dict, Any, Optional, List
 from dotenv import load_dotenv
 import json
 import pytz
+import re  
+import sqlite3
+import boto3
+from tabulate import tabulate
+from pandasai import Agent
+from pandasai.llm.openai import OpenAI
+from langchain.schema import Document
 import requests
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -23,6 +31,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+load_dotenv()
 
 class LeadInfo(BaseModel):
     """Model for lead information."""
@@ -45,8 +54,8 @@ class SalesforceAPI:
     def __init__(self):
         """Initialize Salesforce API client."""
         self.auth_url = "https://iqb4-dev-ed.develop.my.salesforce.com/services/oauth2/token"
-        self.client_id = "3MVG9pRzvMkjMb6kXIMaUGyXNzwSMewmrdMKrZmsdv8ZJ1dRg9cockiUAcWLre745UP.WoR.vWMe0Gh8Q4x35"
-        self.client_secret = "67027AA5E4793A9FDCE0B13FA11E9FA2A41CA7C7270079D654B56EAC195DA91F"
+        self.client_id = os.getenv("SF_CLIENT_ID")
+        self.client_secret = os.getenv("SF_CLIENT_SECRET")
         self.access_token = None
         self.instance_url = None
         self._authenticate()
@@ -250,13 +259,27 @@ class SalesRAGBot:
         self.available_slots = []
         logger.info("SalesRAGBot initialized")
 
+        self.s3_client = boto3.client(
+            's3',
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            region_name=os.getenv('AWS_REGION')
+        )
+        # Load documents (from local or from S3)
+        self.docs = []
+        self.load_documents()
+
+        logger.info("SalesRAGBot initialized")
+
+
     def _setup_environment(self) -> None:
-        """Set up environment variables and API keys."""
-        load_dotenv()
-        if not os.getenv('OPENAI_API_KEY'):
+        """Set up environment variables and API keys."""      
+        OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+        if not OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY not found in environment variables")
-        os.environ["OPENAI_API_KEY"] = os.getenv('OPENAI_API_KEY')
+        
         logger.info("Environment setup completed")
+
 
     def _initialize_components(self) -> None:
         """Initialize all necessary components for the chatbot."""
@@ -274,6 +297,7 @@ class SalesRAGBot:
         except Exception as e:
             logger.error(f"Error initializing components: {str(e)}")
             raise
+
 
     def _load_pdf(self) -> None:
         """Load and split the PDF document."""
@@ -294,6 +318,7 @@ class SalesRAGBot:
             logger.error(f"Error loading PDF: {str(e)}")
             raise
 
+
     def _setup_vector_store(self) -> None:
         """Set up the FAISS vector store."""
         try:
@@ -302,11 +327,136 @@ class SalesRAGBot:
                 documents=self.docs,
                 embedding=embeddings
             )
+            # vectorstore.save_local("C:/Users/admin/Documents/Document/Bot/src/storeJsonRecord")
             logger.info("Vector store created successfully")
             
         except Exception as e:
             logger.error(f"Error setting up vector store: {str(e)}")
             raise
+
+
+    def load_documents(self):
+        print("Starting load_documents")
+        # Load from local JSON if exists, else fetch from S3
+        local_path = 'C:/Users/admin/Documents/Document/Bot/src/storeJsonRecord'
+        if os.path.exists(local_path):
+            try:
+                with open(local_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.docs = [Document(**d) for d in data]
+                print(f"Loaded {len(self.docs)} docs from local JSON")
+                logger.info(f"Loaded {len(self.docs)} documents from local storage.")
+            except Exception as e:
+                logger.error(f"Error loading local JSON: {e}")
+                print("Error loading local JSON:", e)
+                self.docs = []
+        else:
+            # Fetch from S3, process, save locally
+            print("Local file not found, calling fetch_and_save_aws_data")
+            self.fetch_and_save_aws_data(local_path=local_path)
+            print("After fetch_and_save_aws_data")
+            # Load again after fetch
+            if os.path.exists(local_path):
+                try:
+                    with open("C:/Users/admin/Documents/Document/Bot/src/storeJsonRecord", 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    self.docs = [Document(**d) for d in data]
+                    print(f"Loaded {len(self.docs)} docs after fetch")
+                    logger.info(f"Loaded {len(self.docs)} documents from fetched data.")
+                except Exception as e:
+                    logger.error(f"Error loading JSON after fetching: {e}")
+                    self.docs = []
+                    print("Error after fetch:", e)
+            print(f"self.docs : {self.docs}")
+
+
+    def fetch_and_save_aws_data(self, local_path='C:/Users/admin/Documents/Document/Bot/src/storeJsonRecord'):
+        bucket_name = 'accountrecord'
+        key = 'emaarGroupRecords/b8db7d18-6340-4f1b-9bbb-a2736503cc98/1593091727-2025-06-13T07:17:56'
+        try:
+            obj = self.s3_client.get_object(Bucket=bucket_name, Key=key)
+            json_content = obj['Body'].read().decode('utf-8')
+            logger.info("Fetched AWS file content from S3")
+            # Save raw JSON locally
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            with open(local_path, 'w', encoding='utf-8') as f:
+                f.write(json_content)
+            logger.info(f"Saved raw JSON data locally at {local_path}")
+
+            # Parse JSON with better handling (New code starts here)
+            try:
+                data = json.loads(json_content)
+            except json.JSONDecodeError:
+                # fallback: split by lines and parse each
+                lines = json_content.strip().split('\n')
+                data = [json.loads(line) for line in lines if line]
+
+            # Normalize data structure (fix for nested dicts)
+            if isinstance(data, dict):
+                # Convert single dict to list of dicts
+                data = [self._flatten_dict(data)]
+            elif isinstance(data, list):
+                # Check if nested dicts inside list
+                if data and isinstance(data[0], dict):
+                    if any(isinstance(v, dict) for v in data[0].values()):
+                        data = [self._flatten_dict(item) for item in data]
+            else:
+                data = []
+
+            # Now prepare documents with better formatting
+            docs = []
+            for record in data:
+                # Format fields: convert floats to int if appropriate, and handle missing keys
+                area_code = int(record.get('Area_Code__c', 0))
+                plot_number = int(record.get('Plot_Number__c', 0))
+                unit_price = float(record.get('Unit_Price__c', 0))
+                unit_no = int(record.get('Unit_No__c', 0))
+                # Build a readable text block
+                text = (
+                    f"Name: {record.get('Name', 'N/A')}\n"
+                    f"Area: {record.get('Area__c', 'N/A')}\n"
+                    f"Area Code: {area_code} BHK\n"
+                    f"Plot Number: {plot_number}\n"
+                    f"Project Name: {record.get('Project_Name__c', 'N/A')}\n"
+                    f"Project Type: {record.get('Project_Type__c', 'N/A')}\n"
+                    f"Building Number: {int(record.get('Building_Number__c', 0))}\n"
+                    f"Tower Name: {record.get('Tower_Name__c', 'N/A')}\n"
+                    f"Unit No: {unit_no}\n"
+                    f"Unit Type: {record.get('Unit_Type__c', 'N/A')}\n"
+                    f"Unit Price: {unit_price}\n"
+                    f"District: {record.get('District__c', 'N/A')}\n"
+                )
+                docs.append(Document(page_content=text, metadata={"source": "AWS_S3"}))
+            # Save the docs as JSON for later loading
+            with open(local_path, 'w', encoding='utf-8') as f:
+                json.dump([d.dict() for d in docs], f)
+            print(f"Saved {len(docs)} documents to local storage.")
+            logger.info(f"Saved {len(docs)} documents locally at {local_path}")
+            return docs  # Make sure to return docs here
+        except Exception as e:
+            logger.error(f"Error fetching/saving AWS data: {e}")
+            return []
+
+
+    def get_combined_context(self, query: str) -> str:
+        self.fetch_and_save_aws_data()  # Fetch latest data
+        local_path = 'C:/Users/admin/Documents/Document/Bot/src/storeJsonRecord'
+        try:
+            if os.path.exists(local_path):
+                with open(local_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                # Pretty-print JSON data
+                aws_context_str = json.dumps(data, indent=2)
+            else:
+                aws_context_str = "No AWS data available."
+        except Exception as e:
+            aws_context_str = "Error loading AWS data."
+            logger.error(f"Error loading AWS data for context: {e}")
+        # Also get document context as usual
+        doc_context = self._get_relevant_context(query)
+        combined = f"Document Info:\n{doc_context}\n\nAWS Data:\n{aws_context_str}"
+        return combined
+
 
     def _get_relevant_context(self, query: str) -> str:
         """Get relevant context from the vector store."""
@@ -316,6 +466,7 @@ class SalesRAGBot:
         except Exception as e:
             logger.error(f"Error getting context: {str(e)}")
             return ""
+
 
     def _extract_lead_info(self, message: str) -> Optional[Dict[str, str]]:
         """Extract lead information from the message."""
@@ -350,12 +501,19 @@ class SalesRAGBot:
             7. If a field is not found, do not include it in the JSON
             8. Return null if no contact information is found
             9. Handle both single-line and multi-line information
-            10. Look for information even if it's just the value without context (e.g., just an email address)          
+            10. Look for information even if it's just the value without context (e.g., just an email address)  
+            10. **Only provide the answer data available context from the PDF**
+            11. if there is no relevant sytem context as per the question then tell me i dont have enough knowldege about it
+            12. always check the relevance of system context and user query
+            System Context: 
+        
+            Human: {message}       
             Message: {message}
 
             Return ONLY the JSON object or null, nothing else.
+            
             """
-                        
+                       
             response = self.llm.invoke(prompt)
             try:
                 lead_data = json.loads(response.content)
@@ -376,6 +534,7 @@ class SalesRAGBot:
         except Exception as e:
             logger.error(f"Error extracting lead info: {str(e)}")
             return None
+
 
     def _update_lead_state(self, message: str) -> None:
         """Update the lead capture state based on the message."""
@@ -402,79 +561,112 @@ class SalesRAGBot:
                     self.lead_state = LeadCaptureState.INFO_COMPLETE
                     logger.info("All lead information collected")
 
+
     def _get_missing_fields(self) -> List[str]:
         """Get list of missing required fields in lead information."""
         required_fields = ['Name', 'Email', 'Phone']
         return [field for field in required_fields 
                 if field not in self.partial_lead_info or self.partial_lead_info[field] == "N/A"]
 
-    def _generate_response(self, message: str) -> str:
-        """Generate a response using the LLM with enhanced conversation history handling and topic tracking."""
-        if self.awaiting_meeting_response:
-            self.awaiting_meeting_response = False
-            if message.strip().lower() in ["yes", "yeah", "yup", "sure", "please"]:
-                available_slots = self.show_availableMeeting()
-                if available_slots:
-                    slots_text = ", ".join(available_slots)
-                    return f"Here are the available meeting slots: {slots_text}. Please choose one."
-                else:
-                    return "Sorry, no available meeting slots were found at the moment."
+
+    def _flatten_dict(self, d: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dict[str, Any]:
+        """Flatten nested dictionaries."""
+        items = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(self._flatten_dict(v, new_key, sep=sep).items())
             else:
-                return "No problem. Let me know if you need anything else."
-            
+                items.append((new_key, v))
+        return dict(items)
+    
+
+    def _generate_response(self, message: str) -> str:
         try:
-            # Get relevant context
-            context = self._get_relevant_context(message)
+            print('Generate Response is calling before calling fetch and save aws data')
+            self.fetch_and_save_aws_data()
+            print('Generate Response is calling After calling fetch and save aws data')
+            local_path = 'C:/Users/admin/Documents/Document/Bot/src/storeJsonRecord'
+            aws_data_text = ""
+            if os.path.exists(local_path):
+                with open(local_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                aws_data_text = json.dumps(data, indent=2)
+            else:
+                aws_data_text = "No AWS data available."
             
-            # Extract the last few messages for immediate context
-            recent_messages = self.conversation_history[-6:] if len(self.conversation_history) > 6 else self.conversation_history
-            
-            # Extract topics from recent conversation
-            topics_prompt = """Given these conversation messages, identify the main topic being discussed:
-            {}
-            Return ONLY the topic being discussed, nothing else.""".format("\n".join(recent_messages))
-            
+            # Limit the size of aws_data_text
+            aws_data_text = aws_data_text[:2000]
+            # Get combined context from document and AWS
+            context = self.get_combined_context(message)
+
+            # Extract current topic
+            recent_messages = self.conversation_history[-3:] if len(self.conversation_history) > 3 else self.conversation_history
+            topics_prompt = """Given these conversation messages, identify the main topic being discussed:\n{}\nReturn ONLY the topic being discussed, nothing else.""".format("\n".join(recent_messages))
             topic_response = self.llm.invoke(topics_prompt)
             current_topic = topic_response.content
-            
-            # Prepare system context including current topic
+
+            recent_messages_text = "\n".join(recent_messages)
+            # Optionally, truncate recent messages to avoid token overflow
+            recent_messages_text = recent_messages_text[-1000:]  # last 1000 characters
+
+            # Get document context
+            doc_context = self._get_relevant_context(message)
+            # Truncate doc_context if too long
+            if len(doc_context) > 2000:
+                doc_context = doc_context[:2000] + "..."
+
+            # Prepare system context
             system_context = f"""Current topic of discussion: {current_topic}
-            Previous conversation context: {recent_messages}
-            Product information: {context}
+            Previous conversation context: {recent_messages_text}
+            Product information: {doc_context}
             Lead information: {json.dumps(self.partial_lead_info, indent=2) if self.partial_lead_info else "No lead information yet"}
             Lead state: {self.lead_state.value}"""
-            
-            # Enhanced response generation prompt
-            prompt = f"""You are a friendly and professional sales assistant. Your goal is to:
-            1. Provide helpful information about our products/courses
-            2. Engage in natural, human-like conversation
-            3. Maintain continuity with the current topic: {current_topic}
-            4. Understand and reference previous context when relevant
-            5. If the user asks for more information about something you mentioned, expand on that specific topic
-            6. If the query seems to reference previous information but is unclear (like 'Tell me more' or 'What about the price?'),
-               use the current topic to understand what they're asking about
-            7. Be concise but complete in your responses
-            8. Use natural conversational language
-            9. Only ask for contact information when there's genuine interest
-            10. **Only provide the answer data available context from the PDF**
-            11. if there is no relevant sytem context as per the question then tell me i dont have enough knowldege about it
-            12. always check the relevance of system context and user query
+
+            prompt = f"""You are an assistant for Emaar Properties sales team. Follow these rules STRICTLY:
+ 
+            1. ONLY answer questions using information from the **System Context**.
+            2. If the **System Context** does not contain relevant data, reply: **"I’m sorry, I don’t have enough information about that at the moment."**
+            3. NEVER make up information. No assumptions or general answers are allowed.
+            4. Keep responses clear, friendly, and human-like.
+            5. Stay on topic: {current_topic}
+            6. Reference past messages if relevant.
+            7. DO NOT ask for user contact info unless they show real interest.
+            8. Do not mention that you're using a PDF or system context unless asked.
+            9. If the context is unrelated to the question, say you don’t have enough info.
+            10. Keep your tone professional and concise.
+            12. Show the AWS record based on the exact requirment.
+
             System Context:
             {system_context}
-        
+
             Human: {message}
 
-            Assistant: Be direct and natural in your response, maintaining the conversation flow about {current_topic} if relevant."""
-            print(f"system_context  {system_context}")
-            # Get response from LLM
-            response = self.llm.invoke(prompt)
-            return response.content
-            
+            Assistant:"""
+            print(f"system_context  :{system_context}")
+            try:
+                print("Before llm.invoke")
+                response = self.llm.invoke(prompt)
+                print("After llm.invoke")
+                print("Model Response:", response.content)
+                return response.content
+            except Exception as e:
+                print(f"Error during llm.invoke: {e}")
+                return "Error calling language model."           
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}")
             return "Sorry, I encountered an error. Let's try again."
+        
 
     def process_message(self, message: str) -> Dict[str, Any]:
+        """Process a user message and handle lead capture if needed."""
+        data_response = self.process_user_query(message)
+        if data_response:
+            print("\nBot:",data_response)
+            self.conversation_history.append(f"Human: {message}")
+            self.conversation_history.append(f"Assistant: {data_response['response']}")
+            print("data_response:",data_response)
+            return data_response
         """Process a user message and handle lead capture if needed."""
         try:
             # Update lead capture state
@@ -524,7 +716,7 @@ class SalesRAGBot:
                     response += "\n\nSorry, I had trouble saving your information. Would you mind trying again?"
 
             elif self.lead_state == LeadCaptureState.AWAITING_MEETING_CONFIRMATION:
-                if message.strip().lower() in ["yes", "yeah", "y", "sure", "please"]:
+                if message.strip().lower() in ["yes", "yeah", "y", "sure", "please","schedule","schedule meeting"]:
                     self.available_slots = self.salesforce.show_availableMeeting() or []
                     # self.lead_state = LeadCaptureState.NO_INTEREST  # Reset state
                     if self.available_slots:
@@ -614,6 +806,307 @@ class SalesRAGBot:
         )
 
 
+    def interpret_user_query(self, user_question: str) -> Optional[Dict[str, Any]]:
+        prompt = f"""
+        Analyze this query and extract filtering criteria in JSON format with:
+        - Show the aws record in aws when creteria match
+        - field: exact field name to filter
+        - condition: equals/contains/greater_than/less_than/greater_than_or_equal/less_than_or_equal
+        - value: value to compare
+        - sort: optional, either "asc" (for cheapest) or "desc" (for costliest)
+        
+        Supported fields: Name, Area, Area_Code, Plot_Number, 
+                        Project_Name, Project_Type, Building_Number,
+                        Tower_Name, Unit_No, Unit_Type, Unit_Price, District
+        
+        Examples:
+        Input: "Show properties under or equal to 2000"
+        Output: {{"field": "Unit_Price", "condition": "less_than_or_equal", "value": "2000"}}
+
+        Input: "Find properties 2000 or above"
+        Output: {{"field": "Unit_Price", "condition": "greater_than_or_equal", "value": "2000"}}
+        
+        Input: "Show me the cheapest properties"
+        Output: {{"field": "Unit_Price", "sort": "asc"}}
+        
+        Input: "Show me the costliest properties"
+        Output: {{"field": "Unit_Price", "sort": "desc"}}
+        
+        Input: "Show me cheapest studio apartments"
+        Output: [{{"field": "Unit_Type", "condition": "equals", "value": "Studio Apartment"}},
+                {{"field": "Unit_Price", "sort": "asc"}}]
+        
+        Input: "{user_question}"
+        Output:"""
+        
+        try:
+            response = self.llm.invoke(prompt)
+            return json.loads(response.content)
+        except Exception as e:
+            logger.error(f"Error interpreting query: {e}")
+            return None    
+
+
+    def filter_data_by_criteria(self, data: List[Any], criteria: Union[Dict, List[Dict]], user_question: str = "") -> List[Any]:
+        if not criteria:
+            return data
+            
+        # Convert single criteria to list for uniform handling
+        if isinstance(criteria, dict):
+            criteria_list = [criteria]
+        else:
+            criteria_list = criteria
+            
+        filtered_data = data
+        
+        # First apply all filters
+        for criteria in criteria_list:
+            if not criteria:
+                continue
+                
+            field = criteria.get('field', '').lower().replace(' ', '_')
+            condition = criteria.get('condition', '').lower()
+            value = criteria.get('value', '').strip()
+            sort_order = criteria.get('sort', '').lower()
+            
+            if not field:
+                continue
+                
+            # Handle sorting separately
+            if sort_order and field:
+                continue
+                
+            current_filtered = []
+            
+            for item in filtered_data:
+                record = item.dict() if isinstance(item, Document) else item
+                content = record.get('page_content', '')
+                
+                # Extract all fields from content
+                fields_data = {}
+                for line in content.split('\n'):
+                    if ':' in line:
+                        key, val = line.split(':', 1)
+                        normalized_key = key.strip().lower().replace(' ', '_')
+                        fields_data[normalized_key] = val.strip()
+                
+                if field not in fields_data:
+                    continue
+                    
+                record_value = fields_data[field]
+                
+                try:
+                    # Numeric fields
+                    if field in ['plot_number', 'unit_price', 'unit_no', 'area_code', 'building_number']:
+                        try:
+                            record_num = float(record_value.replace(',', '').replace('₹', ''))
+                            filter_num = float(value.replace(',', '').replace('₹', ''))
+                            
+                            if condition == 'equals' and record_num == filter_num:
+                                current_filtered.append(item)
+                            elif condition == 'greater_than' and record_num > filter_num:
+                                current_filtered.append(item)
+                            elif condition == 'less_than' and record_num < filter_num:
+                                current_filtered.append(item)
+                            elif condition == 'greater_than_or_equal' and record_num >= filter_num:
+                                current_filtered.append(item)
+                            elif condition == 'less_than_or_equal' and record_num <= filter_num:
+                                current_filtered.append(item)
+                            elif condition == 'contains' and str(filter_num) in str(record_num):
+                                current_filtered.append(item)
+                        except ValueError:
+                            continue
+                    
+                    # Text fields
+                    else:
+                        record_text = str(record_value).lower()
+                        filter_text = str(value).lower()
+                        
+                        if condition == 'equals' and record_text == filter_text:
+                            current_filtered.append(item)
+                        elif condition == 'contains' and filter_text in record_text:
+                            current_filtered.append(item)
+                        elif condition == 'starts_with' and record_text.startswith(filter_text):
+                            current_filtered.append(item)
+                        elif condition == 'ends_with' and record_text.endswith(filter_text):
+                            current_filtered.append(item)
+                            
+                except Exception as e:
+                    logger.warning(f"Filtering error for field {field}: {e}")
+                    continue
+                    
+            filtered_data = current_filtered
+        
+        # Then apply sorting if specified
+        for criteria in criteria_list:
+            if not criteria:
+                continue
+                
+            field = criteria.get('field', '').lower().replace(' ', '_')
+            sort_order = criteria.get('sort', '').lower()
+            
+            if field and sort_order:
+                try:
+                    # Create a list of tuples (sort_key, item) for sorting
+                    sortable = []
+                    for item in filtered_data:
+                        record = item.dict() if isinstance(item, Document) else item
+                        content = record.get('page_content', '')
+                        
+                        fields_data = {}
+                        for line in content.split('\n'):
+                            if ':' in line:
+                                key, val = line.split(':', 1)
+                                normalized_key = key.strip().lower().replace(' ', '_')
+                                fields_data[normalized_key] = val.strip()
+                        
+                        if field in fields_data:
+                            try:
+                                if field in ['plot_number', 'unit_price', 'unit_no', 'area_code', 'building_number']:
+                                    sort_key = float(fields_data[field].replace(',', '').replace('₹', ''))
+                                else:
+                                    sort_key = fields_data[field].lower()
+                                sortable.append((sort_key, item))
+                            except ValueError:
+                                continue
+                    
+                    # Sort the data
+                    if sort_order == 'asc':
+                        sortable.sort(key=lambda x: x[0])
+                    elif sort_order == 'desc':
+                        sortable.sort(key=lambda x: x[0], reverse=True)
+                    
+                    # Extract just the items in sorted order
+                    filtered_data = [item for (sort_key, item) in sortable]
+                    
+                    # For cheapest/costliest, we might want just the top result
+                    if user_question and ("cheapest" in user_question.lower() or "costliest" in user_question.lower()):
+                        filtered_data = filtered_data[:1]
+                        
+                except Exception as e:
+                    logger.error(f"Error sorting data: {e}")
+                    continue
+                    
+        return filtered_data
+
+
+    def fetch_and_filter_data(self, user_question: str) -> List[Dict[str, Any]]:
+        # Get criteria first to fail fast if interpretation fails
+        criteria = self.interpret_user_query(user_question)
+        if not criteria:
+            try:
+                lower_question = user_question.lower()           
+                # Check for "show all" type requests first
+                if ("show all" in lower_question or "all record" in lower_question or "all aws record" in lower_question or "give me all" in lower_question):
+                    try:
+                        data = self.fetch_and_save_aws_data()
+                        if not data:
+                            return [{"message": "No data available"}]
+                        # Return all data, converting Document objects if needed
+                        return [doc.dict() if isinstance(doc, Document) else doc for doc in data]
+                    except Exception as e:
+                        logger.error(f"Error fetching all data: {e}")
+                        return [{"message": "Error processing your request"}]
+                else:
+                    return [{"message": "No data available"}]
+            except Exception as e:
+                logger.error(f"Error fetching all data: {e}")
+                return [{"message": "Error processing your request"}]
+        
+        # Fetch data with error handling
+        try:
+            data = self.fetch_and_save_aws_data()
+            if not data:
+                return [{"message": "No data available"}]
+                
+            # Apply filters
+            filtered = self.filter_data_by_criteria(data, criteria)
+            if not filtered:
+                return [{"message": "No data available."}]
+                
+            # Convert to consistent format
+            return [doc.dict() if isinstance(doc, Document) else doc for doc in filtered]
+            
+        except Exception as e:
+            logger.error(f"Error filtering data: {e}")
+            return [{"message": "Error processing your request"}]
+
+
+    def process_user_query(self, message: str) -> Optional[Dict[str, Any]]:
+        command_keywords = ["show", "find", "search", "filter", "get", "list", "tell me", "what is"]
+        if any(keyword in message.lower() for keyword in command_keywords):
+            results = self.fetch_and_filter_data(message)
+            
+            if not results:
+                return {
+                    "response": "No data available.",
+                    "lead_info": self.partial_lead_info,
+                    "lead_state": self.lead_state.value
+                }
+                
+            if len(results) == 1 and "message" in results[0]:
+                return {
+                    "response": results[0]["message"],
+                    "lead_info": self.partial_lead_info,
+                    "lead_state": self.lead_state.value
+                }
+            
+            # Prepare table data
+            table_data = []
+            headers = [
+                "Name", "Area", "Plot #", "Project", 
+                "Unit Type", "Price", "District"
+            ]
+            
+            for record in results:
+                if isinstance(record, dict):
+                    content = record.get('page_content', '')
+                    fields = {}
+                    for line in content.split('\n'):
+                        if ':' in line:
+                            key, val = line.split(':', 1)
+                            fields[key.strip()] = val.strip()
+                    
+                    table_data.append([
+                        fields.get('Name', 'N/A'),
+                        fields.get('Area', 'N/A'),
+                        fields.get('Plot Number', 'N/A'),
+                        fields.get('Project Name', 'N/A'),
+                        fields.get('Unit Type', 'N/A'),
+                        fields.get('Unit Price', 'N/A'),
+                        fields.get('District', 'N/A')
+                    ])
+            
+            # Format as table
+            if not table_data:
+                response_text = "No matching records found."
+            else:
+                from tabulate import tabulate
+                table_str = tabulate(
+                    table_data, 
+                    headers=headers,
+                    tablefmt="grid",
+                    numalign="right",
+                    stralign="left"
+                )
+                total_records = len(table_data)
+                response_text = f"```\n{table_str}\n```"  # Wrap in markdown code block
+                response_text += f"\n\nTotal Records found: {total_records}"
+                
+                # Special handling for cheapest/costliest queries
+                if "cheapest" in message.lower() or "costliest" in message.lower():
+                    if table_data:
+                        price = table_data[0][5]  # Unit Price is at index 5
+                        response_text = f"The {'cheapest' if 'cheapest' in message.lower() else 'costliest'} property is:\n\n{response_text}"
+            
+            return {
+                "response": response_text,
+                "lead_info": self.partial_lead_info,
+                "lead_state": self.lead_state.value
+            }
+        return None
+
+
 def main():
     """Main function to run the sales RAG chatbot."""
     try:
@@ -636,7 +1129,8 @@ def main():
             if not user_input:
                 print("Please enter a message.")
                 continue
-                
+            
+            print("Before printing response")
             response = chatbot.process_message(user_input)
             print("\nBot:", response['response'])
             
