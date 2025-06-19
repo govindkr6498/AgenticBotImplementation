@@ -95,7 +95,6 @@ class SalesforceAPI:
             if not self.access_token or not self.instance_url:
                 self._authenticate()
 
-            # Validate lead information
             if any(value == "N/A" for value in lead_info.values()):
                 logger.error("Cannot create lead with N/A values")
                 return False
@@ -116,16 +115,13 @@ class SalesforceAPI:
                 headers=headers,
                 json=sf_lead_payload
             )
-            # response.raise_for_status()
             if response.status_code == 201:
                 lead_id = response.json().get("id")
                 logger.info(f"lead_id: {lead_id}")
                 logger.info(f"Lead created successfully: {response.json()}")
                 return True, lead_id
-                # return True, "Would you like to meet a sales advisor this week?"
             elif response.status_code == 400 and "DUPLICATES_DETECTED" in response.text:
                 error_data = response.json()
-                # Extract duplicate lead ID
                 match_records = (
                     error_data[0]
                     .get("duplicateResult", {})
@@ -137,10 +133,8 @@ class SalesforceAPI:
                     logger.info(f"duplicate_lead_id: {lead_id}")
                     logger.info(f"Lead created successfully: {response.json()}")
                     return True, lead_id
-                    # return True, "Would you like to meet a sales advisor this week?"
             else:
                 logger.info('fail Created')
-            # logger.info(f"Lead created successfully: {response.json()}")
             return "Would you like to meet a sales advisor this week?"
             
         except Exception as e:
@@ -152,14 +146,12 @@ class SalesforceAPI:
             if not self.access_token or not self.instance_url:
                 self._authenticate()
 
-            # Validate lead information
             event_url = f"{self.instance_url}/services/data/v60.0/sobjects/Event/"
             headers = {
                 "Authorization": f"Bearer {self.access_token}",
                 "Content-Type": "application/json"
             }
             start_dt = datetime.strptime(start_time_str, "%H:%M")
-            # Assuming meeting duration 30 minutes, and date as today
             ist = pytz.timezone('Asia/Kolkata')
             start_dt_local = datetime.strptime(start_time_str, "%H:%M")
             today_local = datetime.now(ist).date()
@@ -208,9 +200,6 @@ class SalesforceAPI:
                 data = response.json()
                 records = data.get("records", [])
 
-                # if not records:
-                #     logger.info("No meetings scheduled for today.")
-                # else:
                 fmt = "%H:%M"
                 start_time = datetime.strptime("08:00", fmt)
                 end_time = datetime.strptime("17:00", fmt)
@@ -265,7 +254,6 @@ class SalesRAGBot:
             aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
             region_name=os.getenv('AWS_REGION')
         )
-        # Load documents (from local or from S3)
         self.docs = []
         self.load_documents()
 
@@ -284,15 +272,9 @@ class SalesRAGBot:
     def _initialize_components(self) -> None:
         """Initialize all necessary components for the chatbot."""
         try:
-            # Initialize LLM
             self.llm = ChatOpenAI(model=self.model_name)
-            
-            # Load and process PDF
             self._load_pdf()
-            
-            # Initialize vector store
-            self._setup_vector_store()
-            
+            self._setup_vector_store()          
             logger.info("All components initialized successfully")
         except Exception as e:
             logger.error(f"Error initializing components: {str(e)}")
@@ -327,7 +309,6 @@ class SalesRAGBot:
                 documents=self.docs,
                 embedding=embeddings
             )
-            # vectorstore.save_local("C:/Users/admin/Documents/Document/Bot/src/storeJsonRecord")
             logger.info("Vector store created successfully")
             
         except Exception as e:
@@ -337,7 +318,6 @@ class SalesRAGBot:
 
     def load_documents(self):
         print("Starting load_documents")
-        # Load from local JSON if exists, else fetch from S3
         local_path = 'C:/Users/admin/Documents/Document/Bot/src/storeJsonRecord'
         if os.path.exists(local_path):
             try:
@@ -351,11 +331,9 @@ class SalesRAGBot:
                 print("Error loading local JSON:", e)
                 self.docs = []
         else:
-            # Fetch from S3, process, save locally
             print("Local file not found, calling fetch_and_save_aws_data")
             self.fetch_and_save_aws_data(local_path=local_path)
             print("After fetch_and_save_aws_data")
-            # Load again after fetch
             if os.path.exists(local_path):
                 try:
                     with open("C:/Users/admin/Documents/Document/Bot/src/storeJsonRecord", 'r', encoding='utf-8') as f:
@@ -377,41 +355,31 @@ class SalesRAGBot:
             obj = self.s3_client.get_object(Bucket=bucket_name, Key=key)
             json_content = obj['Body'].read().decode('utf-8')
             logger.info("Fetched AWS file content from S3")
-            # Save raw JSON locally
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
             with open(local_path, 'w', encoding='utf-8') as f:
                 f.write(json_content)
             logger.info(f"Saved raw JSON data locally at {local_path}")
-
-            # Parse JSON with better handling (New code starts here)
             try:
                 data = json.loads(json_content)
             except json.JSONDecodeError:
-                # fallback: split by lines and parse each
                 lines = json_content.strip().split('\n')
                 data = [json.loads(line) for line in lines if line]
 
-            # Normalize data structure (fix for nested dicts)
             if isinstance(data, dict):
-                # Convert single dict to list of dicts
                 data = [self._flatten_dict(data)]
             elif isinstance(data, list):
-                # Check if nested dicts inside list
                 if data and isinstance(data[0], dict):
                     if any(isinstance(v, dict) for v in data[0].values()):
                         data = [self._flatten_dict(item) for item in data]
             else:
                 data = []
 
-            # Now prepare documents with better formatting
             docs = []
             for record in data:
-                # Format fields: convert floats to int if appropriate, and handle missing keys
                 area_code = int(record.get('Area_Code__c', 0))
                 plot_number = int(record.get('Plot_Number__c', 0))
                 unit_price = float(record.get('Unit_Price__c', 0))
                 unit_no = int(record.get('Unit_No__c', 0))
-                # Build a readable text block
                 text = (
                     f"Name: {record.get('Name', 'N/A')}\n"
                     f"Area: {record.get('Area__c', 'N/A')}\n"
@@ -427,32 +395,29 @@ class SalesRAGBot:
                     f"District: {record.get('District__c', 'N/A')}\n"
                 )
                 docs.append(Document(page_content=text, metadata={"source": "AWS_S3"}))
-            # Save the docs as JSON for later loading
             with open(local_path, 'w', encoding='utf-8') as f:
                 json.dump([d.dict() for d in docs], f)
             print(f"Saved {len(docs)} documents to local storage.")
             logger.info(f"Saved {len(docs)} documents locally at {local_path}")
-            return docs  # Make sure to return docs here
+            return docs 
         except Exception as e:
             logger.error(f"Error fetching/saving AWS data: {e}")
             return []
 
 
     def get_combined_context(self, query: str) -> str:
-        self.fetch_and_save_aws_data()  # Fetch latest data
+        self.fetch_and_save_aws_data() 
         local_path = 'C:/Users/admin/Documents/Document/Bot/src/storeJsonRecord'
         try:
             if os.path.exists(local_path):
                 with open(local_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                # Pretty-print JSON data
                 aws_context_str = json.dumps(data, indent=2)
             else:
                 aws_context_str = "No AWS data available."
         except Exception as e:
             aws_context_str = "Error loading AWS data."
             logger.error(f"Error loading AWS data for context: {e}")
-        # Also get document context as usual
         doc_context = self._get_relevant_context(query)
         combined = f"Document Info:\n{doc_context}\n\nAWS Data:\n{aws_context_str}"
         return combined
@@ -471,7 +436,6 @@ class SalesRAGBot:
     def _extract_lead_info(self, message: str) -> Optional[Dict[str, str]]:
         """Extract lead information from the message."""
         try:
-            # Use LLM to extract structured information
             prompt = f"""Extract contact information from the following message. Return ONLY a JSON object with these exact fields if found:
             - Name (required; store full name here)
             - Company (required)
@@ -518,7 +482,6 @@ class SalesRAGBot:
             try:
                 lead_data = json.loads(response.content)
                 if lead_data:
-                    # Normalize and validate each field individually
                     normalized_data = {}
                     for field in ['Name', 'Email', 'Phone']:
                         if field in lead_data and lead_data[field] and lead_data[field] != "N/A":
@@ -551,11 +514,9 @@ class SalesRAGBot:
         if self.lead_state in [LeadCaptureState.INTEREST_DETECTED, LeadCaptureState.COLLECTING_INFO]:
             lead_info = self._extract_lead_info(message)
             if lead_info:
-                # Update partial lead info with new information
                 self.partial_lead_info.update(lead_info)
                 self.lead_state = LeadCaptureState.COLLECTING_INFO
                 
-                # Check if we have all required information
                 if all(key in self.partial_lead_info and self.partial_lead_info[key] not in [None, "N/A"]
                     for key in ['Name', 'Email', 'Phone']):
                     self.lead_state = LeadCaptureState.INFO_COMPLETE
@@ -595,28 +556,21 @@ class SalesRAGBot:
             else:
                 aws_data_text = "No AWS data available."
             
-            # Limit the size of aws_data_text
             aws_data_text = aws_data_text[:2000]
-            # Get combined context from document and AWS
             context = self.get_combined_context(message)
 
-            # Extract current topic
             recent_messages = self.conversation_history[-3:] if len(self.conversation_history) > 3 else self.conversation_history
             topics_prompt = """Given these conversation messages, identify the main topic being discussed:\n{}\nReturn ONLY the topic being discussed, nothing else.""".format("\n".join(recent_messages))
             topic_response = self.llm.invoke(topics_prompt)
             current_topic = topic_response.content
 
             recent_messages_text = "\n".join(recent_messages)
-            # Optionally, truncate recent messages to avoid token overflow
-            recent_messages_text = recent_messages_text[-1000:]  # last 1000 characters
+            recent_messages_text = recent_messages_text[-1000:]
 
-            # Get document context
             doc_context = self._get_relevant_context(message)
-            # Truncate doc_context if too long
             if len(doc_context) > 2000:
                 doc_context = doc_context[:2000] + "..."
 
-            # Prepare system context
             system_context = f"""Current topic of discussion: {current_topic}
             Previous conversation context: {recent_messages_text}
             Product information: {doc_context}
@@ -626,7 +580,7 @@ class SalesRAGBot:
             prompt = f"""You are an assistant for Emaar Properties sales team. Follow these rules STRICTLY:
  
             1. ONLY answer questions using information from the **System Context**.
-            2. If the **System Context** does not contain relevant data, reply: **"I’m sorry, I don’t have enough information about that at the moment."**
+            2. If the **System Context** does not contain relevant data but exception of Schedule meeting and connect, reply: **"I’m sorry, I don’t have enough information about that at the moment."**
             3. NEVER make up information. No assumptions or general answers are allowed.
             4. Keep responses clear, friendly, and human-like.
             5. Stay on topic: {current_topic}
@@ -669,24 +623,15 @@ class SalesRAGBot:
             return data_response
         """Process a user message and handle lead capture if needed."""
         try:
-            # Update lead capture state
             self._update_lead_state(message)
-            
-            # Add user message to conversation history
             self.conversation_history.append(f"Human: {message}")
-            
-            # Generate response
             response = self._generate_response(message)
-            
-            # Add assistant response to conversation history
             self.conversation_history.append(f"Assistant: {response}")
             self.conversation_history = self.conversation_history[-30:]
             logger.info(f"Conversation history: {self.conversation_history}")
-            # Handle lead capture state
             if self.lead_state == LeadCaptureState.INTEREST_DETECTED:
                 missing_fields = self._get_missing_fields()
                 if missing_fields:
-                    # Make the request for information more natural
                     if len(missing_fields) == 1:
                         response += f"\n\nCould you share your {missing_fields[0]}?"
                     else:
@@ -695,13 +640,11 @@ class SalesRAGBot:
             elif self.lead_state == LeadCaptureState.COLLECTING_INFO:
                 missing_fields = self._get_missing_fields()
                 if missing_fields:
-                    # Only ask for missing fields
                     if len(missing_fields) == 1:
                         response += f"\n\nJust need your {missing_fields[0]} to get started."
                     else:
                         response += f"\n\nJust need your {', '.join(missing_fields[:-1])} and {missing_fields[-1]} to get started."
                 else:
-                    # If no missing fields but still in COLLECTING_INFO state, move to INFO_COMPLETE
                     self.lead_state = LeadCaptureState.INFO_COMPLETE
             
             elif self.lead_state == LeadCaptureState.INFO_COMPLETE:
@@ -718,10 +661,8 @@ class SalesRAGBot:
             elif self.lead_state == LeadCaptureState.AWAITING_MEETING_CONFIRMATION:
                 if message.strip().lower() in ["yes", "yeah", "y", "sure", "please","schedule","schedule meeting"]:
                     self.available_slots = self.salesforce.show_availableMeeting() or []
-                    # self.lead_state = LeadCaptureState.NO_INTEREST  # Reset state
                     if self.available_slots:
                         self.lead_state = LeadCaptureState.WAITING_MEETING_SLOT_SELECTION
-                        # slots_text = ", ".join(self.available_slots)
                         slots_text = self.format_slots_nicely(self.available_slots)
                         response += f"\n\nHere are the available meeting slots for today: {slots_text}"
                     else:
@@ -732,18 +673,16 @@ class SalesRAGBot:
                     response += "\n\nNo problem! Let me know if you have any other questions."
 
             elif self.lead_state == LeadCaptureState.WAITING_MEETING_SLOT_SELECTION:
-                # Clean and normalize user input
                 parsed_time = message.strip().lower()
                 parsed_time = parsed_time.replace("\"", "").replace("'", "").replace(" ", "").replace(".", "")
 
-                # Normalize formats like "9", "930", "09", "0930"
                 if parsed_time.isdigit():
                     if len(parsed_time) <= 2:
-                        parsed_time = parsed_time.zfill(2) + ":00"        # "9" -> "09:00"
+                        parsed_time = parsed_time.zfill(2) + ":00"     
                     elif len(parsed_time) == 3:
-                        parsed_time = "0" + parsed_time[0] + ":" + parsed_time[1:]  # "930" -> "09:30"
+                        parsed_time = "0" + parsed_time[0] + ":" + parsed_time[1:]  
                     elif len(parsed_time) == 4:
-                        parsed_time = parsed_time[:2] + ":" + parsed_time[2:]       # "0930" -> "09:30"
+                        parsed_time = parsed_time[:2] + ":" + parsed_time[2:]       
                 elif ":" in parsed_time:
                     parts = parsed_time.split(":")
                     if len(parts) == 2 and all(p.isdigit() for p in parts):
@@ -752,7 +691,6 @@ class SalesRAGBot:
                 logger.info(f"✅ Final normalized time: {parsed_time}")
                 logger.info(f"🔎 Comparing against available slots: {self.available_slots}")
 
-                # Match the time against available slots exactly
                 if parsed_time in self.available_slots and self.current_lead_id:
                     success = self.salesforce.create_meeting(self.current_lead_id, parsed_time)
                     self.lead_state = LeadCaptureState.NO_INTEREST
@@ -785,11 +723,8 @@ class SalesRAGBot:
         """Formats meeting slots in a professional table layout"""
         if not slots:
             return "No available time slots at the moment."
-        
-        # Calculate column width based on longest time slot
         max_length = max(len(slot) for slot in slots) 
-        column_width = max_length + 5  # extra spacing between columns
-        # Format slots into aligned columns
+        column_width = max_length + 5  
         rows = []
         for i in range(0, len(slots), columns):
             row = []
@@ -801,7 +736,7 @@ class SalesRAGBot:
         
         return (
              "Available meeting times:\n\n" +
-            "\n".join(rows) +  # only 1 newline between rows
+            "\n".join(rows) +  
             "\n\nPlease pick one."
         )
 
@@ -991,18 +926,15 @@ class SalesRAGBot:
 
 
     def fetch_and_filter_data(self, user_question: str) -> List[Dict[str, Any]]:
-        # Get criteria first to fail fast if interpretation fails
         criteria = self.interpret_user_query(user_question)
         if not criteria:
             try:
                 lower_question = user_question.lower()           
-                # Check for "show all" type requests first
                 if ("show all" in lower_question or "all record" in lower_question or "all aws record" in lower_question or "give me all" in lower_question):
                     try:
                         data = self.fetch_and_save_aws_data()
                         if not data:
                             return [{"message": "No data available"}]
-                        # Return all data, converting Document objects if needed
                         return [doc.dict() if isinstance(doc, Document) else doc for doc in data]
                     except Exception as e:
                         logger.error(f"Error fetching all data: {e}")
@@ -1013,18 +945,15 @@ class SalesRAGBot:
                 logger.error(f"Error fetching all data: {e}")
                 return [{"message": "Error processing your request"}]
         
-        # Fetch data with error handling
         try:
             data = self.fetch_and_save_aws_data()
             if not data:
                 return [{"message": "No data available"}]
                 
-            # Apply filters
             filtered = self.filter_data_by_criteria(data, criteria)
             if not filtered:
                 return [{"message": "No data available."}]
                 
-            # Convert to consistent format
             return [doc.dict() if isinstance(doc, Document) else doc for doc in filtered]
             
         except Exception as e:
@@ -1051,7 +980,6 @@ class SalesRAGBot:
                     "lead_state": self.lead_state.value
                 }
             
-            # Prepare table data
             table_data = []
             headers = [
                 "Name", "Area", "Plot #", "Project", 
@@ -1077,7 +1005,6 @@ class SalesRAGBot:
                         fields.get('District', 'N/A')
                     ])
             
-            # Format as table
             if not table_data:
                 response_text = "No matching records found."
             else:
@@ -1090,13 +1017,12 @@ class SalesRAGBot:
                     stralign="left"
                 )
                 total_records = len(table_data)
-                response_text = f"```\n{table_str}\n```"  # Wrap in markdown code block
+                response_text = f"```\n{table_str}\n```" 
                 response_text += f"\n\nTotal Records found: {total_records}"
                 
-                # Special handling for cheapest/costliest queries
                 if "cheapest" in message.lower() or "costliest" in message.lower():
                     if table_data:
-                        price = table_data[0][5]  # Unit Price is at index 5
+                        price = table_data[0][5]  
                         response_text = f"The {'cheapest' if 'cheapest' in message.lower() else 'costliest'} property is:\n\n{response_text}"
             
             return {
@@ -1110,7 +1036,6 @@ class SalesRAGBot:
 def main():
     """Main function to run the sales RAG chatbot."""
     try:
-        # Initialize the chatbot
         pdf_path = 'C:/Users/admin/Documents/Document/Bot/src/Emaar_FAQ.pdf' 
         # pdf_path = '/home/ubuntu/AgenticBotImplementation/FSTC_Contact.pdf'
         chatbot = SalesRAGBot(pdf_path)
@@ -1133,8 +1058,7 @@ def main():
             print("Before printing response")
             response = chatbot.process_message(user_input)
             print("\nBot:", response['response'])
-            
-            # Log if lead information was captured
+        
             if response['lead_info']:
                 print("\n[Lead information captured:", response['lead_info'], "]")
                 print("[Current state:", response['lead_state'], "]")
