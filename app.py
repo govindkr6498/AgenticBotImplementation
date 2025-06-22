@@ -20,7 +20,8 @@ app.add_middleware(
 )
 
 # Initialize the chatbot
-pdf_path = '/home/ubuntu/iqb5/PropertyDetail.pdf'
+# pdf_path = 'C:/Users/admin/Documents/Document/Bot/src/FSTC_Contact.pdf'
+pdf_path = '/home/ubuntu/AgenticBotImplementation/FSTC_Contact.pdf'
 chatbot = SalesRAGBot(pdf_path)
 
 class ChatInput(BaseModel):
@@ -45,16 +46,3 @@ async def chat(chat_input: ChatInput):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.get("/")
-# async def root():
-#     """
-#     Root endpoint to verify the API is running
-#     """
-#     return {
-#         "status": "ok",
-#         "message": "Sales RAG Bot API is running"
-#     }
-
-# if __name__ == "__main__":
-#     uvicorn.run(app, host="0.0.0.0", port=8000)
