@@ -14,8 +14,8 @@ class SalesforceAPI:
             self.logger.addHandler(handler)
         self.logger.setLevel(logging.INFO)
         self.auth_url = "https://iqb4-dev-ed.develop.my.salesforce.com/services/oauth2/token"
-        self.client_id = os.getenv("SALESFORCE_CLIENT_ID", "3MVG9pRzvMkjMb6kXIMaUGyXNzwSMewmrdMKrZmsdv8ZJ1dRg9cockiUAcWLre745UP.WoR.vWMe0Gh8Q4x35")
-        self.client_secret = os.getenv("SALESFORCE_CLIENT_SECRET", "67027AA5E4793A9FDCE0B13FA11E9FA2A41CA7C7270079D654B56EAC195DA91F")
+        self.client_id = os.getenv("SF_CLIENT_ID")
+        self.client_secret = os.getenv("SF_CLIENT_SECRET")
         self.access_token = None
         self.instance_url = None
         self._authenticate()
