@@ -28,7 +28,7 @@ agent_instance = None
 @app.on_event("startup")
 def startup_event():
     global agent_instance
-    agent_instance = SalesRAGAgent(pdf_path='FSTC_Contact.pdf')
+    agent_instance = SalesRAGAgent(pdf_path='/home/ubuntu/AgenticBotImplementation/FSTC_Contact.pdf')
 
 @app.post("/chat")
 async def chat_endpoint(request: Request):
