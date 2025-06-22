@@ -49,7 +49,7 @@ class LeadTool:
                 self.logger.info(f"Field {k}: {v}")
                 if v is not None and v != "N/A" and v != "":
                     normalized[k] = v.strip() if isinstance(v, str) else v
-            normalized['Company'] = 'Iquee Tech'  # Always set company
+            normalized['Company'] = 'Iquestbee Technology' 
             self.logger.info(f"Extracted/merged lead info: {normalized}")
             return normalized
         except Exception as e:
