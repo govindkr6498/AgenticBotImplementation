@@ -106,9 +106,9 @@ def main():
     """, unsafe_allow_html=True)
 
     # Header
-    st.title("🤖 Sales Assistant")
+    st.title("🤖 Aerobot Assistant")
     st.markdown("""
-        Welcome to our Sales Assistant! I can help you learn more about our products and services.
+        Welcome to our aerobot Assistant! I can help you learn more about our products and services.
         Feel free to ask any questions!
     """)
 
