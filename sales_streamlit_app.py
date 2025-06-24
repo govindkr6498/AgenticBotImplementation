@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 import json
 import os
-from sales_rag_bot import SalesRAGBot, LeadCaptureState
+from main import SalesRAGAgent  # Changed from SalesRAGBot
 import logging
 
 # Configure logging
@@ -20,10 +20,6 @@ if 'chatbot' not in st.session_state:
     st.session_state.chatbot = None
 if 'messages' not in st.session_state:
     st.session_state.messages = []
-if 'lead_info' not in st.session_state:
-    st.session_state.lead_info = None
-if 'lead_state' not in st.session_state:
-    st.session_state.lead_state = LeadCaptureState.NO_INTEREST.value
 if 'chat_file' not in st.session_state:
     st.session_state.chat_file = None
 
@@ -31,7 +27,7 @@ def initialize_chatbot():
     """Initialize the chatbot for the current session."""
     if st.session_state.chatbot is None:
         try:
-            st.session_state.chatbot = SalesRAGBot('/home/ubuntu/AgenticBotImplementation/Emaar_FAQ.pdf')
+            st.session_state.chatbot = SalesRAGAgent('FSTC_Contact.pdf')  # Changed from SalesRAGBot
             logger.info(f"Chatbot initialized for session {st.session_state.session_id}")
         except Exception as e:
             logger.error(f"Error initializing chatbot: {str(e)}")
@@ -51,9 +47,7 @@ def save_chat_history():
         chat_data = {
             "session_id": st.session_state.session_id,
             "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "messages": st.session_state.messages,
-            "lead_info": st.session_state.lead_info,
-            "lead_state": st.session_state.lead_state
+            "messages": st.session_state.messages
         }
         
         with open(st.session_state.chat_file, "w") as f:
@@ -121,7 +115,6 @@ def main():
     # Initialize chatbot
     initialize_chatbot()
 
-
     # Chat container
     chat_container = st.container()
 
@@ -138,11 +131,7 @@ def main():
         
         # Get bot response
         if st.session_state.chatbot:
-            response = st.session_state.chatbot.process_message(prompt)
-            
-            # Update session state
-            st.session_state.lead_info = response['lead_info']
-            st.session_state.lead_state = response['lead_state']
+            response = st.session_state.chatbot.process(prompt)  # Changed from process_message
             
             # Add bot response to chat
             st.session_state.messages.append({"role": "assistant", "content": response['response']})
@@ -156,4 +145,4 @@ def main():
             st.error("Chatbot not initialized. Please try again.")
 
 if __name__ == "__main__":
-    main() 
+    main()
