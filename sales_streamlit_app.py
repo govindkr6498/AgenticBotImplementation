@@ -3,10 +3,9 @@ import uuid
 from datetime import datetime
 import json
 import os
-from main import SalesRAGAgent  # Changed from SalesRAGBot
+from main import SalesRAGAgent
 import logging
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -27,7 +26,7 @@ def initialize_chatbot():
     """Initialize the chatbot for the current session."""
     if st.session_state.chatbot is None:
         try:
-            st.session_state.chatbot = SalesRAGAgent('FSTC_Contact.pdf')  # Changed from SalesRAGBot
+            st.session_state.chatbot = SalesRAGAgent('Emaar_FAQ.pdf') 
             logger.info(f"Chatbot initialized for session {st.session_state.session_id}")
         except Exception as e:
             logger.error(f"Error initializing chatbot: {str(e)}")
@@ -39,7 +38,6 @@ def save_chat_history():
         # Create chat_history directory if it doesn't exist
         os.makedirs("chat_history", exist_ok=True)
         
-        # If no chat file exists for this session, create one
         if st.session_state.chat_file is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             st.session_state.chat_file = f"chat_history/chat_{st.session_state.session_id}_{timestamp}.json"
@@ -59,7 +57,7 @@ def save_chat_history():
 
 def main():
     st.set_page_config(
-        page_title="Sales Assistant",
+        page_title="IQBAIBots",
         page_icon="🤖",
         layout="wide"
     )
@@ -125,22 +123,28 @@ def main():
                 st.markdown(message["content"])
 
     # Chat input
+        # Chat input
     if prompt := st.chat_input("Type your message here..."):
-        # Add user message to chat
+        # Add user message immediately and display
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        # Get bot response
+        with chat_container:
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
+        # Show spinner while processing response
         if st.session_state.chatbot:
-            response = st.session_state.chatbot.process(prompt)  # Changed from process_message
-            
-            # Add bot response to chat
+            with st.spinner("🤖 Bot is thinking..."):
+                response = st.session_state.chatbot.process(prompt)
+
             st.session_state.messages.append({"role": "assistant", "content": response['response']})
-            
-            # Save chat history
+            with chat_container:
+                with st.chat_message("assistant"):
+                    st.markdown(response['response'])
+
             save_chat_history()
-            
+
             # Rerun to update the UI
-            st.rerun()
+            # st.rerun()
         else:
             st.error("Chatbot not initialized. Please try again.")
 
